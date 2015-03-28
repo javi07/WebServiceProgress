@@ -1,0 +1,270 @@
+/*
+========Consumo de WebService SAP PRECIOS===========
+Autor: JesÃs Javier Lopez Aguilar
+Fecha: 05/01/2015
+Empresa: Palmex Alimentos
+*/
+
+
+{src/web2/wrap-cgi.i}
+output-content-type ("text\plain~; charset=iso-8859-1":U).
+
+
+/*Variables del Webservice */
+DEFINE VARIABLE hWebService AS HANDLE NO-UNDO.
+DEFINE VARIABLE hZSD_PORTAL_PRECIOS_WEB AS HANDLE NO-UNDO.
+
+/*Variables de Proceso*/
+DEFINE VARIABLE IDataInput AS LONGCHAR NO-UNDO.
+DEFINE VARIABLE PtCondiciones AS LONGCHAR NO-UNDO.
+DEFINE VARIABLE EError AS CHARACTER NO-UNDO.
+DEFINE VARIABLE EOk AS CHARACTER NO-UNDO.
+DEFINE VARIABLE EReturn AS CHARACTER NO-UNDO.
+DEFINE VARIABLE resultado AS CHARACTER format "x(20)" NO-UNDO.
+DEFINE VARIABLE resultado2 AS CHARACTER format "x(20)" NO-UNDO.
+DEFINE VARIABLE resultado3 AS CHARACTER format "x(20)" NO-UNDO.
+DEFINE VARIABLE resultado4 AS CHARACTER format "x(20)" NO-UNDO.
+DEFINE VARIABLE gcrowID   AS CHARACTER NO-UNDO.
+
+/*Variables Parametros*/
+Def var tdocto as char.
+Def var orgvta as char.
+Def var canal as char.
+Def var sector as char.
+Def var cvecte as char.
+Def var destino as char.
+Def var producto as char.
+Def var cant as dec.
+Def var incot as char.
+Def var empresa as char. 
+
+
+/*Variables de Resultados*/
+Def var Dato1 as char.
+Def var Dato2 as char.
+Def var Dato3 as char.
+Def var Dato4 as char.
+
+/*Variables de totales*/
+Def var TotPrecio as dec.
+Def var TotDescu as dec.
+
+TotPrecio = 0.
+TotDescu = 0.
+
+/*Tabla de resultado*/
+define temp-table bresp
+  field campo1 as char
+  field campo2 as dec
+  field campo3 as dec
+  field campo4 as char.
+        
+        
+
+/*Genero el Server*/
+CREATE SERVER hWebService.
+
+/*Coneccion al Webservice*/
+hWebService:CONNECT("-WSDL 'http://palmexsapprd.palmex.com:8000/sap/bc/srt/wsdl/flv_10002A111AD1/bndg_url/sap/bc/srt/rfc/sap/zsd_portal_precios_web/300/zsd_portal_precios_web/zsd_portal_precios_web_b?sap-client=300'
+                     -WSDLUserid INTERJOB
+                     -WSDLPassword informatica1
+                     -Port zsd_portal_precios_web_b").
+
+/*Conecto el PortType*/
+RUN ZSD_PORTAL_PRECIOS_WEB SET hZSD_PORTAL_PRECIOS_WEB ON hWebService.
+
+
+/*Cargo parametros*/
+
+Assign tdocto = "ZTMX" 
+        /*orgvta = "PM01"
+        canal = "20"
+        sector = "01"*/
+        /*cvecte = "1100000017"*/
+ 	cvecte = get-value("cliente")
+        /*destino = "1100000017"*/
+	destino = get-value("cliente")
+        /*producto = "PTFTAR006"*/
+	producto = get-value("producto")
+        /*cant = 2*/
+	cant = dec(get-value("cantidad"))
+        incot = ""
+        empresa = "PM01".
+        
+find first cliente where cliente.cve_cte = cvecte .
+         if available cliente then do:
+            canal = cliente.canal.
+            sector = cliente.sector.
+            orgvta = cliente.cve_empresa.
+         end.
+
+Find first TipoPedidoAV where TipoPedidoAV.Org_vta = orgvta and TipoPedidoAV.Canal = canal and TipoPedidoAV.sector = sector.
+if available TipoPedidoAV then do:
+	tdocto = TipoPedidoAV.Tipo_ped.
+end.
+
+/*Genero el longchar de input(parametros)*/
+
+Assign IDataInput = "<IDataInput>
+  <DocType>" + tdocto + "</DocType>
+  <Vkorg>" + orgvta + "</Vkorg>
+  <Vtweg>" + canal + "</Vtweg>
+  <Spart>" + sector + "</Spart>
+  <Kunag>" + cvecte + "</Kunag>
+  <Kunwe>" + destino + "</Kunwe>
+  <Matnr>" + producto + "</Matnr>
+  <Kwmeng>" + string(cant) + "</Kwmeng>
+  <Inco1>" + incot + "</Inco1>
+  <Werks>" + orgvta + "</Werks>
+  </IDataInput>".
+
+
+/*
+Assign IDataInput = "<IDataInput>
+  <DocType>ZTMX</DocType>
+  <Vkorg>PM01</Vkorg>
+  <Vtweg>10</Vtweg>
+  <Spart>01</Spart>
+  <Kunag>1100000017</Kunag>
+  <Kunwe>1100000017</Kunwe>
+  <Matnr>PCBOLI001</Matnr>
+  <Kwmeng>2</Kwmeng>
+  <Inco1>FOB</Inco1>
+  <Werks>PM01</Werks>
+  </IDataInput>".
+*/
+
+
+/*
+display IDataInput view-as editor large inner-chars 100 inner-lines 100 .
+*/
+
+
+/*Ejecuto la operacion del webservice*/
+RUN ZsdfgPortalPreciosWeb IN hZSD_PORTAL_PRECIOS_WEB(INPUT IDataInput, INPUT-OUTPUT PtCondiciones, OUTPUT EError, OUTPUT EOk, OUTPUT EReturn).
+
+
+/*Leo el xml de respuesta*/
+RUN p_LeerXML (INPUT PtCondiciones).
+
+For each bresp :
+  /*
+  Display campo1 "|" campo2 "|" campo3 "|" campo4.   
+  */
+  
+  TotPrecio = TotPrecio + campo2.
+  
+End.
+
+assign  TotDescu = TotPrecio.
+
+
+find first sku where sku.cve_sku = producto no-error.
+if available sku then do:
+	TotPrecio = TotPrecio / sku.peso_neto.
+end.
+
+/*
+Display TotPrecio.
+*/
+
+{&out} string(TotPrecio,"->>>,>>9.99") "|" TotDescu.
+{&END}
+
+ /*************** Procedures ******************/
+ PROCEDURE p_LeerXML: 
+     DEFINE INPUT  PARAMETER RecibeResult AS LONGCHAR    NO-UNDO.
+         
+     DEFINE VARIABLE hParser          AS HANDLE    NO-UNDO.
+
+     CREATE SAX-READER hParser.
+           hParser:SET-INPUT-SOURCE("longchar", RecibeResult).
+           hParser:VALIDATION-ENABLED=TRUE. 
+
+           hParser:SAX-PARSE( ) NO-ERROR.
+
+ END PROCEDURE.
+
+
+
+/*********************  Procedimientos internos  *********************/
+PROCEDURE StartDocument:
+    ASSIGN resultado = "".
+END.
+
+    PROCEDURE EndDocument:
+        /*MESSAGE "regresa: " resultado.*/
+    END.
+
+        PROCEDURE StartElement:
+            DEFINE INPUT PARAMETER pcNamespaceURI AS CHARACTER NO-UNDO.
+            DEFINE INPUT PARAMETER pcLocalName    AS CHARACTER NO-UNDO.
+            DEFINE INPUT PARAMETER pcElementName  AS CHARACTER NO-UNDO.
+            DEFINE INPUT PARAMETER phAttributes   AS HANDLE NO-UNDO.    
+        END.
+
+PROCEDURE Characters:
+   DEFINE INPUT PARAMETER ppText AS MEMPTR NO-UNDO.
+   DEFINE INPUT PARAMETER piNumChars AS INTEGER NO-UNDO.
+
+   gcrowID =  TRIM(GET-STRING(ppText,1,piNumChars)).
+
+END.
+
+PROCEDURE EndElement:
+   DEFINE INPUT PARAMETER pcNamespaceURI AS CHARACTER NO-UNDO.
+   DEFINE INPUT PARAMETER pcLocalName AS CHARACTER NO-UNDO.
+   DEFINE INPUT PARAMETER pcElementName AS CHARACTER NO-UNDO.
+
+
+      IF pcElementName = "Kschl" THEN DO:
+            IF INDEX(resultado,gcrowID) = 0 THEN
+                   resultado = resultado + (IF resultado = "" THEN "" ELSE "|") + gcrowID.
+                   Dato1 = gcrowID.
+      END.
+      IF pcElementName = "Kbetr" THEN DO:
+            IF INDEX(resultado2,gcrowID) = 0 THEN
+                   resultado2 = resultado2 + (IF resultado2 = "" THEN "" ELSE "|") + gcrowID .
+                   Dato2 = gcrowID.
+                                     
+      END.
+      IF pcElementName = "Kwert" THEN DO:
+            IF INDEX(resultado3,gcrowID) = 0 THEN
+                   resultado3 = resultado3 + (IF resultado3 = "" THEN "" ELSE "|") + gcrowID.
+                   Dato3 = gcrowID.
+      END.
+      IF pcElementName = "Kwaeh" THEN DO:
+            IF INDEX(resultado4,gcrowID) = 0 THEN
+                   resultado4 = resultado4 + (IF resultado4 = "" THEN "" ELSE "|") + gcrowID.
+                   Dato4 = gcrowID.
+      END.
+      
+      if Dato1 <> "" and Dato2 <> "" and Dato3 <> "" and Dato4 <> "" Then DO:
+      /*display "<>" Dato1 "<>" Dato2 "<>" Dato3 "<>" Dato4.*/
+      
+      create bresp.
+      assign campo1 = Dato1
+             campo2 = Dec(Dato2)
+             campo3 = Dec(Dato3)
+             campo4 = Dato4.
+      
+      Dato1 = "".
+      Dato2 = "".
+      Dato3 = "".
+      Dato4 = "".
+      End.
+                           
+END.
+
+PROCEDURE FatalError:
+   DEFINE INPUT PARAMETER pcMessage AS CHARACTER NO-UNDO.
+          resultado = "Fatal Error Detected : " + pcMessage.
+   RETURN ERROR. 
+END.
+
+PROCEDURE Error:
+   DEFINE INPUT PARAMETER pcMessage AS CHARACTER NO-UNDO.
+                             
+   resultado = "Schema validation error in element: " + pcMessage.
+   RETURN ERROR. 
+END.
